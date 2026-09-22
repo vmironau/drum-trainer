@@ -53,6 +53,7 @@ export class LessonEngine {
   private rafId: number | null = null;
   private phaseStartMs: number | null = null;
   private performanceStartMs: number | null = null;
+  private plannedPerformanceStartMs: number | null = null;
   private scoring: StepScoringWindows = DEFAULT_SCORING;
 
   constructor(lesson: Lesson, clock: MusicalClock, callbacks: LessonEngineCallbacks) {
@@ -145,8 +146,14 @@ export class LessonEngine {
       const elapsed = now - this.phaseStartMs;
       const remaining = Math.max(0, Math.ceil((countInMs - elapsed) / msBeat));
       this.callbacks.onCountdown(remaining);
+      // Musical time is negative during count-in so the highway can pre-position notes.
+      if (this.plannedPerformanceStartMs !== null) {
+        const musicalElapsed = now - this.plannedPerformanceStartMs;
+        const durationMs = arrangementDurationMs(step.arrangement, this.playbackBpm);
+        this.callbacks.onPlayhead(musicalElapsed, durationMs);
+      }
       if (elapsed >= countInMs) {
-        this.beginPerformance(now);
+        this.beginPerformance(this.plannedPerformanceStartMs ?? now);
       }
     } else if (
       (this.phase === 'preview' || this.phase === 'performance') &&
@@ -201,7 +208,11 @@ export class LessonEngine {
 
   private beginPerformance(now: number): void {
     this.performanceStartMs = now;
-    this.scheduled = this.buildScheduled(now);
+    this.plannedPerformanceStartMs = now;
+    // Keep pre-built schedule if present; otherwise build now.
+    if (this.scheduled.length === 0) {
+      this.scheduled = this.buildScheduled(now);
+    }
     this.performanceHits = [];
     this.scoring = this.currentWindows();
     this.setPhase('performance');
@@ -253,11 +264,17 @@ export class LessonEngine {
     this.stopLoop();
     this.clock.start();
     const now = this.clock.now();
+    const step = this.getCurrentStep();
+    const beatsPerBar = step.arrangement.beatsPerBar;
+    const msBeat = 60000 / this.playbackBpm;
+    const countInMs = COUNT_IN_BARS * beatsPerBar * msBeat;
     this.phaseStartMs = now;
+    this.plannedPerformanceStartMs = now + countInMs;
     this.performanceStartMs = null;
-    this.scheduled = [];
-    this.performanceHits = [];
     this.scoring = this.currentWindows();
+    // Pre-schedule so the highway can show approaching notes during count-in.
+    this.scheduled = this.buildScheduled(this.plannedPerformanceStartMs);
+    this.performanceHits = [];
     this.setPhase('count_in');
     this.rafId = requestAnimationFrame(this.tick);
   }
