@@ -8,7 +8,7 @@ export interface MusicalClock {
 }
 
 export function createMusicalClock(
-  nowFn: () => number = performance.now
+  nowFn: () => number = () => performance.now()
 ): MusicalClock {
   let startTime: number | null = null;
   let running = false;
