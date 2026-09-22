@@ -17,6 +17,7 @@ import type {
 } from '../domain/lessonTypes';
 import { setLastSessionResult } from '../state/resultStore';
 import type { Route } from '../router';
+import { NoteHighway, scheduledToHighwayNotes } from './NoteHighway';
 
 const RATING_COLORS: Record<string, string> = {
   perfect: 'text-success-400 bg-success-500/10 border-success-500/30',
@@ -101,6 +102,12 @@ export function TrainerScreen({
       onPlayhead: (elapsed, duration) => {
         setPlayhead(elapsed);
         setDurationMs(Math.max(duration, 1));
+        // Keep highway schedule in sync during count-in (before first evaluation).
+        const eng = engineRef.current;
+        if (eng) {
+          const sched = eng.getScheduled();
+          if (sched.length) setScheduled([...sched]);
+        }
       },
       onCountdown: (remaining) => {
         setCountdown(remaining > 0 ? remaining : null);
@@ -163,6 +170,8 @@ export function TrainerScreen({
     setStepResult(null);
     engineRef.current?.setPlaybackBpm(bpm);
     engineRef.current?.preview();
+    const sched = engineRef.current?.getScheduled() ?? [];
+    setScheduled([...sched]);
     startMetronome(step.arrangement.bars);
   };
 
@@ -173,6 +182,8 @@ export function TrainerScreen({
     setAccuracy(100);
     engineRef.current?.setPlaybackBpm(bpm);
     engineRef.current?.startPerformance();
+    const sched = engineRef.current?.getScheduled() ?? [];
+    setScheduled([...sched]);
     startMetronome(step.arrangement.bars);
   };
 
@@ -199,7 +210,7 @@ export function TrainerScreen({
 
   const active =
     phase === 'preview' || phase === 'count_in' || phase === 'performance';
-  const playheadPercent = Math.min((playhead / durationMs) * 100, 100);
+  const playheadPercent = Math.min(Math.max(playhead, 0) / durationMs * 100, 100);
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
@@ -276,42 +287,27 @@ export function TrainerScreen({
         </div>
       </div>
 
-      {countdown !== null && countdown > 0 && (
-        <div className="flex flex-col items-center justify-center py-12">
-          <div className="text-6xl font-bold text-accent-400 font-mono animate-pulse">
-            {countdown}
-          </div>
-          <p className="text-ink-400 text-sm mt-2">Count-in...</p>
-        </div>
-      )}
-
-      {(active || phase === 'ready' || phase === 'result') && (
-        <div className="mb-6">
-          <p className="text-ink-400 text-xs uppercase tracking-wide mb-2">
-            Expected ({step.arrangement.events.length} events)
-          </p>
-          <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">
-            {(scheduled.length ? scheduled : step.arrangement.events.map((event) => ({
-              event,
-              absoluteBeat: 0,
-              expectedTimeMs: 0,
-              state: 'pending' as const,
-            }))).slice(0, 64).map((s, i) => (
-              <div
-                key={s.event.id + i}
-                className={`px-2 py-1 rounded text-xs font-mono border ${
-                  s.state === 'hit'
-                    ? 'bg-success-500/10 border-success-500/30 text-success-400'
-                    : s.state === 'missed'
-                      ? 'bg-error-500/10 border-error-500/30 text-error-400'
-                      : 'bg-ink-800/60 border-ink-700/50 text-ink-400'
-                }`}
-              >
-                {s.event.instrument} b{s.event.bar + 1}.{s.event.beat + 1}
-              </div>
-            ))}
-          </div>
-        </div>
+      {(active || phase === 'ready' || phase === 'count_in' || phase === 'result') && (
+        <NoteHighway
+          notes={
+            scheduled.length
+              ? scheduledToHighwayNotes(scheduled, bpm)
+              : scheduledToHighwayNotes(
+                  step.arrangement.events.map((event) => ({
+                    event,
+                    absoluteBeat:
+                      event.bar * step.arrangement.beatsPerBar + event.beat,
+                    expectedTimeMs: 0,
+                    state: 'pending' as const,
+                  })),
+                  bpm
+                )
+          }
+          musicalTimeMs={
+            phase === 'ready' || phase === 'idle' || phase === 'result' ? 0 : playhead
+          }
+          countdown={countdown}
+        />
       )}
 
       {evaluatedHits.length > 0 && (
